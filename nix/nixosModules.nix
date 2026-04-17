@@ -471,6 +471,32 @@
         '';
       };
 
+      # ── Dashboard (built-in web UI) ────────────────────────────────────
+      dashboard = {
+        enable = mkEnableOption "Hermes Agent dashboard (built-in web UI)";
+
+        host = mkOption {
+          type = types.str;
+          default = "0.0.0.0";
+          description = "Host address to bind the dashboard to.";
+        };
+
+        port = mkOption {
+          type = types.int;
+          default = 9119;
+          description = "Port for the dashboard to listen on.";
+        };
+
+        insecure = mkOption {
+          type = types.bool;
+          default = true;
+          description = ''
+            Allow binding to non-localhost addresses.
+            Required when host is 0.0.0.0.
+          '';
+        };
+      };
+
       # ── OCI Container (opt-in) ──────────────────────────────────────────
       container = {
         enable = mkEnableOption "OCI container mode (Ubuntu base, full self-modification support)";
@@ -779,6 +805,53 @@ HERMES_NIX_ENV_EOF
             pkgs.bash
             pkgs.coreutils
             pkgs.git
+          ] ++ cfg.extraPackages;
+        };
+      })
+
+      # ── Dashboard systemd service ────────────────────────────────────────
+      (lib.mkIf cfg.dashboard.enable {
+        systemd.services.hermes-dashboard = {
+          description = "Hermes Agent Dashboard (built-in web UI)";
+          wantedBy = [ "multi-user.target" ];
+          after = [ "network-online.target" ];
+          wants = [ "network-online.target" ];
+
+          environment = {
+            HOME = cfg.stateDir;
+            HERMES_HOME = "${cfg.stateDir}/.hermes";
+            HERMES_MANAGED = "true";
+          };
+
+          serviceConfig = {
+            User = cfg.user;
+            Group = cfg.group;
+            WorkingDirectory = cfg.workingDirectory;
+
+            ExecStart = lib.concatStringsSep " " ([
+              "${cfg.package}/bin/hermes"
+              "dashboard"
+              "--host" cfg.dashboard.host
+              "--port" (toString cfg.dashboard.port)
+              "--no-open"
+            ] ++ lib.optional cfg.dashboard.insecure "--insecure");
+
+            Restart = cfg.restart;
+            RestartSec = cfg.restartSec;
+            UMask = "0007";
+
+            # Hardening
+            NoNewPrivileges = true;
+            ProtectSystem = "strict";
+            ProtectHome = false;
+            ReadWritePaths = [ cfg.stateDir ];
+            PrivateTmp = true;
+          };
+
+          path = [
+            cfg.package
+            pkgs.bash
+            pkgs.coreutils
           ] ++ cfg.extraPackages;
         };
       })
